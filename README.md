@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/zacharyhampton-homeharvest-mcp-badge.png)](https://mseep.ai/app/zacharyhampton-homeharvest-mcp)
+
 # homeharvest-mcp
 
 An MCP server built with Smithery.
