@@ -259,3 +259,14 @@ def test_proxy_reaches_source(engine, tempe):
 def test_health(engine):
     h = engine.health(Settings(proxy="http://x"))
     assert h["status"] == "ok" and h["settings"]["proxy_configured"] is True and "rows" in h["cache"]
+
+
+def test_limit_stops_fetching_early(engine, tempe):
+    sql = "SELECT property_id FROM properties WHERE location = 'Tempe, AZ' AND status = 'for_sale' LIMIT 5"
+    rows, meta = run(engine, sql)
+    assert len(rows) == 5 and meta["fetched_pages"] == 1 and meta["complete"] is True
+    rows, meta = run(engine, sql)
+    assert meta["cache"] == "hit" and meta["fetched_pages"] == 0
+    # an ORDER BY query needs everything, so it resumes the slice
+    rows, meta = run(engine, sql.replace("LIMIT 5", "ORDER BY list_price LIMIT 5"))
+    assert meta["fetched_pages"] == 2 and meta["complete"] is True

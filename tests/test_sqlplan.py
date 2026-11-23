@@ -288,3 +288,16 @@ def test_duckdb_functions_survive_roundtrip():
     sql = p.sql.upper()
     for token in ("MEDIAN(SOLD_PRICE)", "QUANTILE_CONT", "GROUP BY ALL", "LIMIT 10", "'POOL'"):
         assert token in sql
+
+
+def test_limit_hint_only_for_plain_selects():
+    base = "FROM properties WHERE location = 'Tempe, AZ' AND status = 'for_sale'"
+    assert plan(f"SELECT address {base} LIMIT 5").limit_hint == 5
+    assert plan(f"SELECT address {base} AND beds > 3 LIMIT 5").limit_hint == 5
+    for q in (f"SELECT address {base} ORDER BY list_price LIMIT 5",
+              f"SELECT count(*) {base} LIMIT 5",
+              f"SELECT zip, count(*) {base} GROUP BY zip LIMIT 5",
+              f"SELECT DISTINCT zip {base} LIMIT 5",
+              f"SELECT address {base}",
+              f"SELECT p.address FROM properties p JOIN agents a USING (property_id) WHERE location = 'Tempe, AZ' LIMIT 5"):
+        assert plan(q).limit_hint is None, q

@@ -60,6 +60,7 @@ class Plan:
     specs: list[SliceSpec] = field(default_factory=list)
     history_ids: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    limit_hint: int | None = None  # set when any N matching rows answer the query
 
     @property
     def needs_listings(self) -> bool:
@@ -495,4 +496,24 @@ def plan_query(sql: str, today: date | None = None) -> Plan:
         node.replace(exp.true())
     plan.sql = tree.sql(dialect="duckdb") if stripped else sql.strip().rstrip(";")
     plan.notes = list(dict.fromkeys(notes))
+    plan.limit_hint = _limit_hint(tree)
     return plan
+
+
+def _limit_hint(tree: exp.Expression) -> int | None:
+    """A plain `SELECT cols FROM one_table WHERE ... LIMIT n` is answered by any n matching
+    rows, so fetching can stop as soon as n rows match locally."""
+    if not isinstance(tree, exp.Select) or tree.args.get("with"):
+        return None
+    if any(tree.args.get(k) for k in ("group", "order", "having", "distinct", "joins", "qualify", "offset")):
+        return None
+    if tree.find(exp.AggFunc, exp.Window, exp.Subquery) or len(list(tree.find_all(exp.Select))) > 1:
+        return None
+    limit = tree.args.get("limit")
+    if limit is None:
+        return None
+    try:
+        n = int(_const(limit.expression))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return n if 0 < n <= 1000 else None

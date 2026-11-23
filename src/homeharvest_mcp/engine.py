@@ -60,6 +60,15 @@ class FetchStats:
     source_total: int = 0
     errors: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    scope: list[str] = field(default_factory=list)  # slice ids gathered so far
+    stop_check: object = None  # callable(slice_ids) -> bool: LIMIT already satisfied locally
+    early_stop: bool = False
+
+    def satisfied(self, sid: str) -> bool:
+        if self.stop_check is not None and self.stop_check(self.scope + [sid]):
+            self.early_stop = True
+            return True
+        return False
 
 
 class Engine:
@@ -112,6 +121,8 @@ class Engine:
                 stats.notes.append(sl["capped_reason"])
             return [sid]
 
+        if stats.satisfied(sid):
+            return [sid]
         if budget[0] <= 0:
             stats.complete = False
             if sl["rows"]:
@@ -140,6 +151,8 @@ class Engine:
         pages, rows, total = sl["pages"] or 0, sl["rows"] or 0, sl["source_total"]
         complete, capped = False, None
         while budget[0] > 0:
+            if pages and stats.satisfied(sid):
+                break
             if offset >= MAX_OFFSET:
                 complete = True
                 capped = (
@@ -189,7 +202,7 @@ class Engine:
                 self.store.update_slice(con, sid, complete=True, capped_reason=capped)
             stats.notes.append(capped)
             stats.complete = False
-        elif not complete:
+        elif not complete and not stats.early_stop:
             stats.complete = False
         stats.source_total += total or rows
         return [sid]
@@ -244,6 +257,15 @@ class Engine:
         stats.history_requests += math.ceil(len(todo) / 50)
         with self.store.connect() as con:
             self.store.put_history(con, got, flatten_history)
+
+    def _count_at_least(self, plan: Plan, sids: list[str], n: int) -> bool:
+        with self.store.connect() as con:
+            self._views(con, sids, plan.history_ids, scoped_history=True)
+            try:
+                got = con.execute(f"SELECT count(*) FROM (SELECT 1 FROM ({plan.sql}) LIMIT {int(n)})").fetchone()[0]
+            except duckdb.Error:
+                return False
+        return got >= n
 
     # ------------------------------------------------------------------ views
     @staticmethod
@@ -304,8 +326,11 @@ class Engine:
         budget = [max(1, int(settings.max_pages))]
         slice_ids: list[str] = []
         try:
+            if plan.limit_hint:
+                stats.stop_check = lambda sids: self._count_at_least(plan, sids, plan.limit_hint)
             for spec in plan.specs:
                 slice_ids += self._ensure(src, spec, settings, stats, budget)
+                stats.scope = list(slice_ids)
         except SourceError as e:
             if not slice_ids:
                 return _error(str(e))
@@ -368,6 +393,8 @@ class Engine:
         }
         if plan.specs:
             meta["source_rows"] = stats.source_total
+        if stats.early_stop:
+            stats.notes.append("Stopped fetching once the LIMIT was met (no ORDER BY/GROUP BY, so any matching rows qualify).")
         if not stats.complete and stats.pages and budget[0] <= 0:
             stats.notes.append(
                 f"Stopped at the page cap ({settings.max_pages} pages x {PAGE_SIZE} rows). Re-run the same query to "
