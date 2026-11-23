@@ -14,6 +14,7 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 from smithery.decorators import smithery
 
+from . import __version__
 from .describe import describe_text
 from .engine import Engine, Settings
 
@@ -68,7 +69,8 @@ def build_server(host: str = "0.0.0.0", port: int = 8081) -> FastMCP:
     """host: the bind address. Loopback keeps the SDK's DNS-rebinding guard (Host must be
     localhost); any other bind (hosted, e.g. Smithery behind a proxy) turns it off so the
     public Host header is accepted."""
-    server = FastMCP("homeharvest", instructions=INSTRUCTIONS, host=host, port=port)
+    server = FastMCP("homeharvest", instructions=INSTRUCTIONS, host=host, port=port, log_level="WARNING")
+    server._mcp_server.version = __version__  # report our version, not the SDK's
     ro = ToolAnnotations(readOnlyHint=True, openWorldHint=True, idempotentHint=True)
 
     @server.tool(

@@ -1,1 +1,4 @@
+# Smithery Python runtime: builds with uv and serves [tool.smithery].server
+# (homeharvest_mcp.server:create_server) over streamable HTTP. Session config
+# (proxy_url, max_pages, cache_ttl_hours) comes from ConfigSchema in server.py.
 runtime: python
