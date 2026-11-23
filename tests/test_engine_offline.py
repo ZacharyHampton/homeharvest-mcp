@@ -232,9 +232,9 @@ def test_big_window_splits_under_10k(tmp_path):
 def test_source_error_teaches(tmp_path):
     src = FakeSource({}, fail="Realtor.com blocked the request (403). Wait a minute and retry, or set a proxy")
     e = Engine(store=Store(tmp_path / "c.duckdb"), source_factory=src)
-    out = e.query("SELECT * FROM properties WHERE location = 'Tempe, AZ'", settings=Settings())
-    rows = [json.loads(x) for x in out.splitlines()]
-    assert rows[-1]["complete"] is False and "proxy" in rows[-1]["errors"][0]
+    out = e.query("SELECT count(*) FROM properties WHERE location = 'Tempe, AZ'", settings=Settings())
+    # cold cache + failed fetch: an error, never a confident count of 0
+    assert out.count("\n") == 0 and "proxy" in json.loads(out)["error"]
 
 
 def test_query_errors_are_json(engine):
@@ -270,3 +270,64 @@ def test_limit_stops_fetching_early(engine, tempe):
     # an ORDER BY query needs everything, so it resumes the slice
     rows, meta = run(engine, sql.replace("LIMIT 5", "ORDER BY list_price LIMIT 5"))
     assert meta["fetched_pages"] == 2 and meta["complete"] is True
+
+
+def test_failed_fetch_with_cached_rows_returns_data_and_error(tmp_path):
+    src = FakeSource({("tempe, az", "for_sale"): [home(i) for i in range(300)]})
+    e = Engine(store=Store(tmp_path / "c.duckdb"), source_factory=src)
+    run(e, "SELECT 1 FROM properties WHERE location = 'Tempe, AZ' AND status = 'for_sale'", max_pages=1)
+    src.fail = "Realtor.com blocked the request (403)."
+    rows, meta = run(e, "SELECT count(*) n FROM properties WHERE location = 'Tempe, AZ' AND status = 'for_sale'")
+    assert rows[0]["n"] == 200 and meta["complete"] is False and "403" in meta["errors"][0]
+
+
+def test_foreclosure_not_served_from_unfiltered(engine, tempe):
+    run(engine, "SELECT 1 FROM properties WHERE location = 'Mesa, AZ' AND status = 'for_sale'")
+    _, meta = run(engine, "SELECT count(*) FROM properties WHERE location = 'Mesa, AZ' AND status = 'for_sale' AND is_foreclosure")
+    assert meta["cache"] == "miss"
+
+
+def test_cte_named_like_storage_table_rejected(engine):
+    out = json.loads(engine.query("WITH t_slices AS (SELECT 1) SELECT * FROM t_slices", settings=Settings()))
+    assert "t_" in out["error"]
+
+
+def _documented_examples():
+    import re
+    from pathlib import Path
+
+    from homeharvest_mcp.describe import EXAMPLES
+    sqls = [line.strip()[2:] for line in EXAMPLES.splitlines() if line.strip().startswith("- SELECT")]
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    block = readme.split("## Example queries", 1)[1].split("## Schema", 1)[0]
+    for chunk in re.findall(r"```sql\n(.*?)```", block, re.S):
+        stmt = []
+        for line in chunk.splitlines():
+            if line.startswith("--"):
+                if stmt:
+                    sqls.append(" ".join(stmt))
+                stmt = []
+            elif line.strip():
+                stmt.append(line.strip())
+        if stmt:
+            sqls.append(" ".join(stmt))
+    return sqls
+
+
+@pytest.mark.parametrize("sql", _documented_examples())
+def test_documented_examples_run(tmp_path, sql):
+    class AnySource(FakeSource):
+        def fetch_page(self, spec, loc, offset):
+            st = spec.status
+            rows = [home(i, status=st if st != "pending" else "for_sale", pending=st == "pending",
+                         sold_date="2026-11-05" if st == "sold" else None, open_house=True) for i in range(5)]
+            return Page(total=5, homes=rows if offset == 0 else [], raw_count=5 if offset == 0 else 0)
+
+        def resolve(self, spec):
+            return Location(text=spec.location, area_type="address" if spec.radius else "city",
+                            centroid={"lat": 33.4, "lon": -111.9})
+
+    e = Engine(store=Store(tmp_path / "c.duckdb"), source_factory=AnySource({}))
+    out = e.query(sql, settings=Settings())
+    meta = json.loads(out.splitlines()[-1])
+    assert "error" not in meta, (sql, meta)

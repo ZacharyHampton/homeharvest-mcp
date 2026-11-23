@@ -93,3 +93,17 @@ def test_env_proxy_for_stdio(fake, monkeypatch):
     monkeypatch.setenv("HOMEHARVEST_PROXY", "http://env:1")
     s = srv.settings_from_ctx(None)
     assert s.proxy == "http://env:1"
+
+
+def test_env_vars_not_masked_by_schema_defaults(monkeypatch):
+    monkeypatch.setenv("HOMEHARVEST_MCP_MAX_PAGES", "9")
+
+    class Req:
+        scope = {"session_config": srv.ConfigSchema(proxy_url="http://p:1")}
+
+    class Ctx:
+        class request_context:
+            request = Req()
+
+    s = srv.settings_from_ctx(Ctx())
+    assert s.max_pages == 9 and s.proxy == "http://p:1"

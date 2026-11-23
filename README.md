@@ -38,7 +38,7 @@ WHERE location = 'Scottsdale, AZ' AND status = 'for_sale' GROUP BY ALL ORDER BY 
 
 -- Upcoming open houses
 SELECT p.address, o.start_time, o.end_time FROM open_houses o JOIN properties p USING (property_id)
-WHERE location = 'Tempe, AZ' AND status = 'for_sale' AND o.start_time >= current_date ORDER BY o.start_time
+WHERE location = 'Tempe, AZ' AND p.status = 'for_sale' AND o.start_time >= current_date ORDER BY o.start_time
 
 -- Price history of one home (no location needed)
 SELECT date, event, price FROM price_history WHERE property_id = '1365850953' ORDER BY date

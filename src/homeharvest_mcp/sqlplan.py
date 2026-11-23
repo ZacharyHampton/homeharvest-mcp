@@ -134,6 +134,8 @@ def _parse(sql: str) -> exp.Expression:
 
 def _check_tables(tree: exp.Expression) -> set[str]:
     ctes = {c.alias_or_name.lower() for c in tree.find_all(exp.CTE)}
+    if any(c.startswith("t_") for c in ctes):
+        raise QueryError("CTE names can't start with 't_'. Pick another name.")
     used: set[str] = set()
     for t in tree.find_all(exp.Table):
         if not isinstance(t.this, exp.Identifier):

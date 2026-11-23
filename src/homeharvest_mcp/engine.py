@@ -97,9 +97,11 @@ class Engine:
             sl = self.store.get_slice(con, sid)
             if sl and sl["fetched_at"] < cutoff:
                 sl = None
-            if sl is None and spec.filter_sig:
+            # An unfiltered complete slice can answer a filtered query (filters re-run locally),
+            # except foreclosure: unfiltered rows don't know whether they're foreclosures.
+            if sl is None and spec.filter_sig and "foreclosure" not in spec.filter_dict:
                 alt = self.store.find_unfiltered(con, spec.location_key, spec.status, spec.bucket, cutoff)
-                if alt:
+                if alt and not alt["children"]:
                     stats.slices_hit += 1
                     stats.source_total += alt["source_total"] or 0
                     return [alt["slice_id"]] + json.loads(alt["children"] or "[]")
@@ -258,6 +260,13 @@ class Engine:
         with self.store.connect() as con:
             self.store.put_history(con, got, flatten_history)
 
+    def _scope_has_rows(self, sids: list[str]) -> bool:
+        if not sids:
+            return False
+        with self.store.connect() as con:
+            sl = ", ".join(f"'{s}'" for s in sids)
+            return con.execute(f"SELECT count(*) FROM t_properties WHERE slice_id IN ({sl})").fetchone()[0] > 0
+
     def _count_at_least(self, plan: Plan, sids: list[str], n: int) -> bool:
         with self.store.connect() as con:
             self._views(con, sids, plan.history_ids, scoped_history=True)
@@ -336,6 +345,9 @@ class Engine:
                 return _error(str(e))
             stats.errors.append(str(e))
             stats.complete = False
+
+        if stats.errors and not self._scope_has_rows(slice_ids) and not plan.history_ids:
+            return _error(stats.errors[0])
 
         if plan.needs_history:
             ids = list(plan.history_ids)

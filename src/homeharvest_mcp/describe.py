@@ -34,7 +34,7 @@ examples:
   - SELECT zip, median(sold_price) AS median_price, count(*) AS sales FROM properties WHERE location = 'Phoenix, AZ' AND status = 'sold' AND sold_date >= '2026-10-01' GROUP BY zip ORDER BY median_price DESC LIMIT 10
   - SELECT address, list_price, beds, baths, sqft, days_on_mls, url FROM properties WHERE zip = '85004' AND status = 'for_sale' AND beds >= 3 ORDER BY list_price LIMIT 20
   - SELECT name, email, phone, count(*) AS listings FROM agents WHERE location = 'Scottsdale, AZ' AND status = 'for_sale' GROUP BY ALL ORDER BY listings DESC LIMIT 20
-  - SELECT p.address, o.start_time, o.end_time FROM open_houses o JOIN properties p USING (property_id) WHERE location = 'Tempe, AZ' AND status = 'for_sale' AND o.start_time >= current_date ORDER BY o.start_time LIMIT 20
+  - SELECT p.address, o.start_time, o.end_time FROM open_houses o JOIN properties p USING (property_id) WHERE location = 'Tempe, AZ' AND p.status = 'for_sale' AND o.start_time >= current_date ORDER BY o.start_time LIMIT 20
   - SELECT date, event, price FROM price_history WHERE property_id = '1365850953' ORDER BY date
   - SELECT property_type, count(*) AS n, round(avg(days_on_mls)) AS avg_dom FROM properties WHERE location = 'Austin, TX' AND status = 'pending' GROUP BY 1 ORDER BY n DESC
   - SELECT address, list_price, estimated_value, list_price - estimated_value AS gap FROM properties WHERE location = 'Mesa, AZ' AND status = 'for_sale' AND estimated_value IS NOT NULL ORDER BY gap LIMIT 10

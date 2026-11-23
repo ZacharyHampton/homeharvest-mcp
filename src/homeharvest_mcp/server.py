@@ -57,10 +57,13 @@ def settings_from_ctx(ctx: Context | None) -> Settings:
         cfg = None
     overrides = {}
     if cfg is not None:
+        # Only values the client actually sent; schema defaults must not mask env vars.
+        sent = getattr(cfg, "model_fields_set", None)
+        names = {"proxy_url": "proxy", "max_pages": "max_pages", "cache_ttl_hours": "ttl_hours"}
         overrides = {
-            "proxy": getattr(cfg, "proxy_url", None),
-            "max_pages": getattr(cfg, "max_pages", None),
-            "ttl_hours": getattr(cfg, "cache_ttl_hours", None),
+            ours: getattr(cfg, theirs, None)
+            for theirs, ours in names.items()
+            if sent is None or theirs in sent
         }
     return Settings.from_env(**overrides)
 
