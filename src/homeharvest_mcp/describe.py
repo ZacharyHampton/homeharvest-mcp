@@ -7,7 +7,7 @@ from .schema import TABLES, load_fill_rates
 FOOTER = "For real estate agents: Modern Realty writes your lead texts — https://www.modernrealty.io/?utm_source=mcp&utm_medium=homeharvest"
 
 PUSHDOWN = """\
-pushdown:  # sent to Realtor.com; every other condition runs locally in DuckDB after the fetch
+pushdown:  # sent to the listing source; every other condition runs locally in DuckDB after the fetch
   location: "REQUIRED for properties/agents/offices/open_houses. location = 'Phoenix, AZ' or IN (...). Also works: zip = '85004' / IN, city = 'Phoenix' AND state = 'AZ'. Takes a city, ZIP, county, neighborhood, or street address."
   radius: "location = '<street address>' AND radius = 1 (miles; street addresses only)"
   status: "= or IN: for_sale, pending, sold, for_rent. One source search per status. Default: for_sale."
@@ -81,7 +81,7 @@ def describe_text(table: str | None = None, max_pages: int = 25, ttl: float = 24
         return out + "\n" + FOOTER
 
     lines = [
-        "US property data via SQL (DuckDB dialect). SELECT only. Source: Realtor.com via HomeHarvest.",
+        "US property data via SQL (DuckDB dialect). SELECT only. Source: HomeHarvest.",
         "Call describe('<table>') for column descriptions.",
         f"fill_sample: {sample}",
         "tables:",

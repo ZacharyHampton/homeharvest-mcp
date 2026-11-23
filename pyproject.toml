@@ -5,12 +5,12 @@ build-backend = "uv_build"
 [project]
 name = "homeharvest-mcp"
 version = "2.0.0"
-description = "US property data via SQL. An MCP server over HomeHarvest (Realtor.com listings) with a local DuckDB cache."
+description = "US property data via SQL. An MCP server over HomeHarvest with a local DuckDB cache."
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Zachary Hampton", email = "zachary@bunsly.com" }]
 requires-python = ">=3.10"
-keywords = ["mcp", "real-estate", "sql", "duckdb", "homeharvest", "realtor"]
+keywords = ["mcp", "real-estate", "sql", "duckdb", "homeharvest", "property-data", "sold-comps", "open-houses"]
 dependencies = [
     "homeharvest>=0.8.18,<0.10",
     "mcp[cli]>=1.13,<2",
@@ -33,5 +33,5 @@ server = "homeharvest_mcp.server:create_server"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["live: hits Realtor.com over the network (run with -m live)"]
+markers = ["live: hits the live listing source over the network (run with -m live)"]
 addopts = "-m 'not live'"

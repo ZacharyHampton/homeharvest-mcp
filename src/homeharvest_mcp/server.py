@@ -25,7 +25,7 @@ INSTRUCTIONS = (
 
 
 class ConfigSchema(BaseModel):
-    proxy_url: str | None = Field(None, description="HTTP(S) proxy for Realtor.com requests, e.g. http://user:pass@host:port")
+    proxy_url: str | None = Field(None, description="HTTP(S) proxy for listing requests, e.g. http://user:pass@host:port")
     max_pages: int = Field(25, ge=1, le=50, description="Max 200-row pages fetched from the source per query call")
     cache_ttl_hours: float = Field(24.0, gt=0, le=24 * 30, description="Hours to reuse fetched rows before refetching")
 

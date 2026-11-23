@@ -1,6 +1,6 @@
 # HomeHarvest MCP: US property data via SQL
 
-An MCP server that lets AI agents query US real estate listings (for sale, pending, sold, rentals) with SQL. It runs on [HomeHarvest](https://github.com/ZacharyHampton/HomeHarvest), which reads Realtor.com.
+An MCP server that lets AI agents query US property data (for sale, pending, sold, rentals, open houses, listing agents, price and tax history) with SQL. It runs on [HomeHarvest](https://github.com/ZacharyHampton/HomeHarvest).
 
 The agent writes a `SELECT`. The server fetches only the listings that query needs, caches them in a local DuckDB file, runs the SQL there, and returns a few compact NDJSON rows. An aggregate like "median sold price by ZIP" comes back as 10 small rows, not 2,000 raw listings.
 
@@ -128,7 +128,7 @@ uvx --from git+https://github.com/ZacharyHampton/homeharvest-mcp homeharvest-mcp
 
 | Env var (stdio) | Smithery / HTTP param | Default | Meaning |
 |---|---|---|---|
-| `HOMEHARVEST_PROXY` | `proxy_url` | none | Proxy for Realtor.com requests (use one if you see 403s) |
+| `HOMEHARVEST_PROXY` | `proxy_url` | none | Proxy for listing requests (use one if you see 403s) |
 | `HOMEHARVEST_MCP_MAX_PAGES` | `max_pages` | 25 | Pages (200 rows each) fetched per query call |
 | `HOMEHARVEST_MCP_TTL_HOURS` | `cache_ttl_hours` | 24 | How long cached rows are reused |
 | `HOMEHARVEST_MCP_MAX_HISTORY` | | 500 | Homes per call for price/tax history |
@@ -139,7 +139,7 @@ uvx --from git+https://github.com/ZacharyHampton/homeharvest-mcp homeharvest-mcp
 ```bash
 uv sync --extra test
 uv run pytest            # offline unit tests
-uv run pytest -m live -s # live smoke test against Realtor.com
+uv run pytest -m live -s # live smoke test against the listing source
 uv run dev               # Smithery dev server
 ```
 

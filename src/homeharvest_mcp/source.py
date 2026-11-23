@@ -139,13 +139,13 @@ def _friendly(exc: Exception) -> SourceError:
     msg = str(exc)
     if name == "AuthenticationError" or "403" in msg:
         return SourceError(
-            "Realtor.com blocked the request (403). Wait a minute and retry, or set a proxy "
+            "The listing source blocked the request (403). Wait a minute and retry, or set a proxy "
             "(env HOMEHARVEST_PROXY, or proxy_url in the server config)."
         )
     if "ProxyError" in msg or "ProxyError" in name:
         return SourceError("Could not connect through the proxy. Check proxy_url (or HOMEHARVEST_PROXY), e.g. http://user:pass@host:port.")
     if name == "RateLimitError" or "429" in msg:
-        return SourceError("Realtor.com is rate limiting (429). Wait a minute, or set a proxy.")
+        return SourceError("The listing source is rate limiting (429). Wait a minute, or set a proxy.")
     return SourceError(f"Fetch failed: {name}: {msg[:300]}")
 
 
