@@ -1,128 +1,138 @@
-"""
-👋 Welcome to your Smithery project!
-To run your server, use "uv run dev"
-To test interactively, use "uv run playground"
+"""MCP server: describe / query / health over stdio or streamable HTTP (Smithery-compatible)."""
 
-You might find this resources useful:
+from __future__ import annotations
 
-🧑‍💻 MCP's Python SDK (helps you define your server)
-https://github.com/modelcontextprotocol/python-sdk
-"""
-
-from mcp.server.fastmcp import Context, FastMCP
-from pydantic import BaseModel, Field
-from typing import Optional, List, Annotated
-from datetime import datetime
+import argparse
 import json
+import os
+import threading
+from typing import Annotated
 
+import anyio
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.types import ToolAnnotations
+from pydantic import BaseModel, Field
 from smithery.decorators import smithery
-from homeharvest import scrape_property, ListingType, SearchPropertyType
+
+from .describe import describe_text
+from .engine import Engine, Settings
+
+INSTRUCTIONS = (
+    "US property listings (for sale, pending, sold, rentals) as SQL tables. Call describe() once, then "
+    "query() with a location filter. Aggregate in SQL to keep results small."
+)
 
 
 class ConfigSchema(BaseModel):
-    proxy_url: str = Field(False, description="Proxy URL for requests (if needed)")
+    proxy_url: str | None = Field(None, description="HTTP(S) proxy for Realtor.com requests, e.g. http://user:pass@host:port")
+    max_pages: int = Field(25, ge=1, le=50, description="Max 200-row pages fetched from the source per query call")
+    cache_ttl_hours: float = Field(24.0, gt=0, le=24 * 30, description="Hours to reuse fetched rows before refetching")
 
 
-@smithery.server()
-def create_server():
-    """Create and configure the MCP server."""
+_engine: Engine | None = None
+_engine_lock = threading.Lock()
 
-    # Create your FastMCP server as usual
-    server = FastMCP("HomeHarvest MCP Server")
 
-    @server.tool()
-    def scrape_properties(
-        location: Annotated[str, Field(description="Location to search (ZIP code, city, address, neighborhood, county, etc.)")],
-        listing_type: Annotated[ListingType, Field(description="Type of listing: FOR_SALE, FOR_RENT, SOLD, or PENDING")],
-        property_type: Annotated[Optional[List[SearchPropertyType]], Field(
-            default=None,
-            description="Filter by property types: single_family, multi_family, condos, condo_townhome_rowhome_coop, condo_townhome, townhomes, duplex_triplex, farm, land, mobile"
-        )] = None,
-        past_days: Annotated[Optional[int], Field(
-            default=None, 
-            description="Filter properties listed/sold within the last N days"
-        )] = None,
-        radius: Annotated[Optional[float], Field(
-            default=None,
-            description="Search radius in miles around the specified location"
-        )] = None,
-        limit: Annotated[Optional[int], Field(
-            default=5,
-            description="Maximum number of properties to return (max 10,000, default 5)"
-        )] = 5,
-        date_from: Annotated[Optional[str], Field(
-            default=None,
-            description="Start date for listing search in YYYY-MM-DD format"
-        )] = None,
-        date_to: Annotated[Optional[str], Field(
-            default=None,
-            description="End date for listing search in YYYY-MM-DD format"
-        )] = None,
-        mls_only: Annotated[Optional[bool], Field(
-            default=False,
-            description="Fetch only MLS listings (excludes non-MLS sources)"
-        )] = False,
-        foreclosure: Annotated[Optional[bool], Field(
-            default=False,
-            description="Fetch only foreclosure properties"
-        )] = False,
-        extra_property_data: Annotated[Optional[bool], Field(
-            default=False,
-            description="Fetch additional property details (may increase request time)"
-        )] = False,
-        exclude_pending: Annotated[Optional[bool], Field(
-            default=False,
-            description="Exclude pending properties from for_sale results"
-        )] = False,
-        ctx: Context = None
+def get_engine() -> Engine:
+    global _engine
+    with _engine_lock:
+        if _engine is None:
+            _engine = Engine()
+        return _engine
+
+
+def settings_from_ctx(ctx: Context | None) -> Settings:
+    """Session config (Smithery query params) wins over env vars; stdio uses env vars."""
+    cfg = None
+    try:
+        request = ctx.request_context.request if ctx is not None else None
+        if request is not None:
+            cfg = request.scope.get("session_config")
+            if cfg is None:
+                # Plain HTTP without the Smithery middleware: read ?proxy_url=... directly.
+                q = request.query_params
+                cfg = ConfigSchema(**{k: q[k] for k in ConfigSchema.model_fields if k in q})
+    except Exception:  # noqa: BLE001 - no request (stdio) or bad params
+        cfg = None
+    overrides = {}
+    if cfg is not None:
+        overrides = {
+            "proxy": getattr(cfg, "proxy_url", None),
+            "max_pages": getattr(cfg, "max_pages", None),
+            "ttl_hours": getattr(cfg, "cache_ttl_hours", None),
+        }
+    return Settings.from_env(**overrides)
+
+
+def build_server() -> FastMCP:
+    server = FastMCP("homeharvest", instructions=INSTRUCTIONS)
+    ro = ToolAnnotations(readOnlyHint=True, openWorldHint=True, idempotentHint=True)
+
+    @server.tool(
+        annotations=ro,
+        description=(
+            "Schema for the property tables (properties, agents, offices, open_houses, price_history, tax_history): "
+            "columns, types, fill %, which WHERE filters are sent to the source and their cost, and example queries. "
+            "Call first. Pass table for column descriptions."
+        ),
+    )
+    def describe(
+        table: Annotated[str | None, Field(description="One table name, or omit for all tables")] = None,
+        ctx: Context = None,
     ) -> str:
-        """Scrape real estate properties using HomeHarvest.
-        
-        This tool provides comprehensive real estate data scraping with flexible
-        filtering options for location, property type, date ranges, and more.
-        """
+        s = settings_from_ctx(ctx)
+        return describe_text(table, max_pages=s.max_pages, ttl=s.ttl_hours, max_history=s.max_history)
 
-        session_config = ctx.session_config
+    @server.tool(
+        annotations=ro,
+        description=(
+            "Run one read-only SELECT (DuckDB SQL) over US property listings. Needs a location: "
+            "WHERE location = 'Phoenix, AZ' (or zip = '85004', or city + state). Filters on status, sold_date/list_date, "
+            "beds, sqft, list_price, year_built, property_type are sent to the source; the rest runs locally. "
+            "Rows are cached 24h. Returns NDJSON rows, then a metadata line "
+            '{"truncated","total_rows","fetched_pages","cache","complete"}. Prefer COUNT/AVG/MEDIAN/GROUP BY.'
+        ),
+    )
+    async def query(
+        sql: Annotated[str, Field(description="One SELECT statement")],
+        max_rows: Annotated[int, Field(description="Rows to return (1-1000)", ge=1, le=1000)] = 50,
+        ctx: Context = None,
+    ) -> str:
+        settings = settings_from_ctx(ctx)
+        engine = get_engine()
+        return await anyio.to_thread.run_sync(lambda: engine.query(sql, max_rows=max_rows, settings=settings))
 
-        try:
-            # Validate date formats if provided
-            if date_from:
-                try:
-                    datetime.strptime(date_from, '%Y-%m-%d')
-                except ValueError:
-                    return "Error: date_from must be in YYYY-MM-DD format.\n\nFix the errors and try again."
-            
-            if date_to:
-                try:
-                    datetime.strptime(date_to, '%Y-%m-%d')
-                except ValueError:
-                    return "Error: date_to must be in YYYY-MM-DD format.\n\nFix the errors and try again."
-
-            # Scrape properties using homeharvest
-            properties_data = scrape_property(
-                location=location,
-                listing_type=listing_type.value,
-                property_type=[property_type_value.value for property_type_value in property_type] if property_type else None,
-                past_days=past_days,
-                radius=radius,
-                limit=limit,
-                date_from=date_from,
-                date_to=date_to,
-                mls_only=mls_only,
-                foreclosure=foreclosure,
-                extra_property_data=extra_property_data,
-                exclude_pending=exclude_pending,
-                proxy=session_config.proxy_url if hasattr(session_config, 'proxy_url') else None,
-                return_type="raw"
-            )
-            
-            # Handle empty results
-            if not properties_data:
-                return "No properties found matching the specified criteria."
-            
-            return json.dumps(properties_data, default=str)
-            
-        except Exception as e:
-            return f"Unexpected error retrieving properties:\n\n{str(e)}\n\nFix the errors (if possible) and try again."
+    @server.tool(annotations=ro, description="Server and HomeHarvest versions, cache size, and fetch settings.")
+    async def health(ctx: Context = None) -> str:
+        settings = settings_from_ctx(ctx)
+        engine = get_engine()
+        info = await anyio.to_thread.run_sync(lambda: engine.health(settings))
+        return json.dumps(info, separators=(",", ":"))
 
     return server
+
+
+@smithery.server(config_schema=ConfigSchema)
+def create_server():
+    """Smithery entry point ([tool.smithery] in pyproject.toml)."""
+    return build_server()
+
+
+def main(argv: list[str] | None = None):
+    p = argparse.ArgumentParser(prog="homeharvest-mcp", description="HomeHarvest MCP server: US property data via SQL")
+    p.add_argument("--transport", choices=["stdio", "http"], default=os.environ.get("MCP_TRANSPORT", "stdio"))
+    p.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
+    p.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8081")))
+    args = p.parse_args(argv)
+    if args.transport == "stdio":
+        build_server().run("stdio")
+        return
+    import uvicorn
+
+    # Same Smithery wrapper as hosted deploys: ?proxy_url=...&max_pages=... become session config, plus CORS.
+    app = create_server().streamable_http_app()
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+
+
+if __name__ == "__main__":
+    main()
