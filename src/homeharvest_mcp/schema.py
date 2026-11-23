@@ -105,9 +105,9 @@ OFFICES = [
 OPEN_HOUSES = [
     ("property_id", "VARCHAR", "Hop to properties."),
     ("status", "VARCHAR", "That listing's status."),
-    ("start_time", "TIMESTAMP", "Open house start (UTC as reported)."),
-    ("end_time", "TIMESTAMP", "Open house end."),
-    ("time_zone", "VARCHAR", "Time zone label from the source."),
+    ("start_time", "TIMESTAMP", "Open house start, local time at the home (see time_zone)."),
+    ("end_time", "TIMESTAMP", "Open house end, local time."),
+    ("time_zone", "VARCHAR", "Time zone of start/end, e.g. MST, EST."),
     ("description", "VARCHAR", "Notes from the listing agent."),
     ("methods", "VARCHAR[]", "e.g. ['in_person'] or ['virtual']."),
 ]

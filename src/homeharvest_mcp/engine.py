@@ -294,7 +294,8 @@ class Engine:
             f"""CREATE OR REPLACE TEMP VIEW properties AS
             SELECT {', '.join(pcols)} FROM (
                 SELECT t.*, s.location_key,
-                       row_number() OVER (PARTITION BY t.property_id, t.status, s.location_key ORDER BY t.fetched_at DESC) AS _rn
+                       row_number() OVER (PARTITION BY t.property_id, t.status, s.location_key
+                                          ORDER BY t.fetched_at DESC, t.list_date DESC NULLS LAST, t.listing_id DESC NULLS LAST) AS _rn
                 FROM t_properties t JOIN t_slices s USING (slice_id)
                 WHERE t.slice_id IN ({sl})
             ) WHERE _rn = 1"""
