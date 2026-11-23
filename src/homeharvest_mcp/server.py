@@ -64,8 +64,11 @@ def settings_from_ctx(ctx: Context | None) -> Settings:
     return Settings.from_env(**overrides)
 
 
-def build_server() -> FastMCP:
-    server = FastMCP("homeharvest", instructions=INSTRUCTIONS)
+def build_server(host: str = "0.0.0.0", port: int = 8081) -> FastMCP:
+    """host: the bind address. Loopback keeps the SDK's DNS-rebinding guard (Host must be
+    localhost); any other bind (hosted, e.g. Smithery behind a proxy) turns it off so the
+    public Host header is accepted."""
+    server = FastMCP("homeharvest", instructions=INSTRUCTIONS, host=host, port=port)
     ro = ToolAnnotations(readOnlyHint=True, openWorldHint=True, idempotentHint=True)
 
     @server.tool(
@@ -114,7 +117,8 @@ def build_server() -> FastMCP:
 
 @smithery.server(config_schema=ConfigSchema)
 def create_server():
-    """Smithery entry point ([tool.smithery] in pyproject.toml)."""
+    """Smithery entry point ([tool.smithery] in pyproject.toml). The config schema is passed
+    here, which is what makes ?proxy_url=... reach the tools (v1 left it out)."""
     return build_server()
 
 
@@ -130,7 +134,9 @@ def main(argv: list[str] | None = None):
     import uvicorn
 
     # Same Smithery wrapper as hosted deploys: ?proxy_url=...&max_pages=... become session config, plus CORS.
-    app = create_server().streamable_http_app()
+    from smithery.server.fastmcp_patch import from_fastmcp
+
+    app = from_fastmcp(build_server(host=args.host, port=args.port), config_schema=ConfigSchema).streamable_http_app()
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
 

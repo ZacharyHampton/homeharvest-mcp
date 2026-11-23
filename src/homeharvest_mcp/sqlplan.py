@@ -15,6 +15,7 @@ import calendar
 import math
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 import duckdb
 import sqlglot
@@ -309,6 +310,8 @@ def _analyze_one(c: exp.Expression, f: _Filters):
             _bound(f.dates, col, d, d)
     elif col in NUMERIC_PUSHDOWN:
         v = _const(node)
+        if isinstance(v, Decimal):
+            v = float(v)
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             return
         lo, hi = _num_bounds(op, float(v))
@@ -475,7 +478,7 @@ def plan_query(sql: str, today: date | None = None) -> Plan:
                 if spec.key not in seen:
                     seen.add(spec.key)
                     plan.specs.append(spec)
-        if not plan.specs and plan.needs_listings:
+        if not any(f.has_location for f in filters) and plan.needs_listings:
             raise QueryError(
                 "Add a location so the server knows what to fetch: " + EXAMPLE_LOCATION +
                 " (or WHERE zip = '85004', or WHERE city = 'Phoenix' AND state = 'AZ')."
